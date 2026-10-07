@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rsqsi"
+version = "0.1.0"
+description = "Rayleigh-Schroedinger effective-Hamiltonian term generator for disordered quantum spin ice"
+requires-python = ">=3.10"
+dependencies = [
+    "sympy",
+    "numpy",
+    "Commutation>=1.5.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+packages = ["rsqsi", "rsqsi.geometry"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

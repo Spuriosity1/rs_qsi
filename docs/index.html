@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rsqsi — RS effective Hamiltonians for disordered quantum spin ice</title>
+<meta name="description" content="A Python engine that generates terms of the Rayleigh–Schrödinger series for the effective Hamiltonian of quantum spin ice with disorder.">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+    svg: { fontCache: 'global' }
+  };
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="toc">
+  <div class="brand"><span>rs</span>qsi</div>
+  <div class="tag">effective Hamiltonians for disordered QSI</div>
+  <div class="links">
+    <a href="#overview">Overview</a>
+    <a href="#theory">Perturbative formalism</a>
+    <a href="#procedure">The generating procedure</a>
+    <a href="#algorithm">How the engine works</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#validation">Validation</a>
+    <a href="#arbitrary">Arbitrary terms</a>
+    <a href="#usage">Install &amp; run</a>
+    <a href="#roadmap">Roadmap</a>
+    <a href="#refs">References</a>
+  </div>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>Effective Hamiltonians for <span class="accent">disordered quantum spin ice</span></h1>
+  <p class="lede">A Python engine that generates terms of the Rayleigh–Schrödinger
+  series for the effective Hamiltonian \(H_{\mathrm{eff}}\) of quantum spin ice,
+  with fully symbolic couplings — ready for spatial disorder.</p>
+  <div class="badges">
+    <span class="badge">Python ≥ 3.10</span>
+    <span class="badge">sympy · numpy · Commutation</span>
+    <span class="badge good">9 / 9 tests passing</span>
+    <span class="badge">increment 1</span>
+  </div>
+</header>
+
+<!-- ================================================================= -->
+<section id="overview">
+  <h2>Overview</h2>
+  <p>
+    Quantum spin ice (QSI) is a candidate \(U(1)\) quantum spin liquid on the
+    pyrochlore lattice. Its low-energy physics is governed by an
+    <em>effective Hamiltonian</em> obtained by degenerate perturbation theory within
+    the extensively-degenerate “2-in-2-out” ice manifold: a transverse coupling
+    \(V\) is treated as a perturbation on top of the dominant Ising interaction
+    \(H_0\), generating ring-exchange and higher processes order by order.
+  </p>
+  <p>
+    This project implements the <strong>“general procedure for generating
+    terms”</strong> from the PhD thesis (Sanders 2026, Ch.&nbsp;1 and Appendix&nbsp;B).
+    The goal is a <em>general</em> tool: given any off-diagonal perturbation on any
+    ice lattice, it produces the symbolic effective operators — with per-site /
+    per-bond couplings, so that spatial <strong>disorder</strong> enters simply as
+    distinct coupling symbols that can later be evaluated numerically.
+  </p>
+  <div class="note">
+    <strong>Status.</strong> Increment&nbsp;1 implements the Brillouin–Wigner
+    connected-loop term \(V\,(Q G_0 V)^{n-1}\) at \(E_0\) — the part that generates
+    all new operator structures — and now accepts an <strong>arbitrary</strong>
+    off-diagonal term (ladder operators dressed with \(S^z\) factors). It is
+    validated against the breathing-pyrochlore XXZ results in the thesis.
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section id="theory">
+  <h2>Perturbative formalism</h2>
+  <p>
+    Split the Hamiltonian into a diagonal part and a small off-diagonal
+    perturbation, \(H = H_0 + V\). For QSI,
+  </p>
+  <div class="eq">\[
+    H_0 = \sum_{t}\frac{J_\parallel(t)}{2}\bigl(\partial S^z(t)\bigr)^2 ,
+    \qquad
+    V = \text{off-diagonal (spinon-transport) terms}.
+  \]</div>
+  <p>
+    \(H_0\) counts the magnetic “charge” \(\partial S^z(t)=\sum_{i\in t}S^z_i\) on
+    every tetrahedron \(t\); the ice manifold \(\mathcal M\) is its degenerate ground
+    space (all \(\partial S^z(t)=0\)). With \(P\) the projector onto \(\mathcal M\),
+    \(Q = 1-P\), and \(G_0(E) = [E-H_0]^{-1}\), the Brillouin–Wigner effective
+    Hamiltonian is
+  </p>
+  <div class="eq">\[
+    H_{\mathrm{eff}}^{\mathrm{BW}}(E) - H_0
+      = P\bigl[\,V + V G_0(E) Q V + V G_0(E) Q V G_0(E) Q V + \cdots\bigr]P .
+  \]</div>
+  <p>
+    Expanding the energy dependence gives the Rayleigh–Schrödinger–Kato series,
+  </p>
+  <div class="eq">\[
+    H_{\mathrm{eff}}^{(n)} = \!\!\sum_{\substack{m\ \text{factors of}\ V\\ m+\sum a = n}}\!\!
+      V Q G_0^{(a_1)} V Q G_0^{(a_2)} \cdots V ,
+  \]</div>
+  <p>
+    whose leading, “irreducible” piece is the BW term \(V\,(Q G_0(E_0) V)^{n-1}\)
+    — the object this increment computes.
+  </p>
+
+  <h3>String operators and the linked-cluster theorem</h3>
+  <p>
+    Every off-diagonal term is a <em>string operator</em> — a product of ladder
+    operators along an oriented path \(\gamma\) on the lattice,
+    \( \mathcal O(\gamma)=\prod_{l\in\gamma} S^{\,l}/\tilde s\). Applied to an ice
+    state it creates spinons at the endpoints \(\partial\gamma\); it preserves the
+    ice manifold iff \(\gamma\) is a <em>closed loop</em>. The linked-cluster
+    theorem restricts \(H_{\mathrm{eff}}\) to <strong>connected</strong> clusters, so
+    at each order one only needs connected, closed loops of string operators.
+  </p>
+</section>
+
+<!-- ================================================================= -->
+<section id="procedure">
+  <h2>The generating procedure</h2>
+  <p>The thesis states the recipe for the order-\(N\) term as:</p>
+  <div class="panel">
+    <ol>
+      <li>Fix an order \(N\) — this sets the number of string-operator “paths”.</li>
+      <li>Arrange the paths into a <strong>connected, closed loop</strong> so that all
+        spinons are annihilated (linked-cluster).</li>
+      <li>Write down the \(N!\) orderings of the chosen operator set; for each, compute
+        the virtual spinon energy entering every propagator factor \([-H_0]^{-1}\).</li>
+      <li>Sum over all orderings.</li>
+    </ol>
+  </div>
+  <p>
+    For the breathing-pyrochlore XXZ model the leading non-trivial order is
+    \(N=3\): three two-site hops close into a hexagon and produce the canonical
+    ring exchange
+  </p>
+  <div class="eq">\[
+    \Bigl[\,3!\,\tfrac{J_{\pm,B}^{3}}{J_{zz,A}^{2}}
+      + 3!\,\tfrac{J_{\pm,A}^{3}}{J_{zz,B}^{2}}\Bigr]\,
+    S_1^{+}S_2^{-}S_3^{+}S_4^{-}S_5^{+}S_6^{-} \;=\; g\,\mathcal O_p .
+  \]</div>
+</section>
+
+<!-- ================================================================= -->
+<section id="algorithm">
+  <h2>How the engine works</h2>
+  <p>
+    Because the effective operator is local, the engine reconstructs it from its
+    action on the <em>support</em> of the process alone. For a given cluster and
+    order \(N\):
+  </p>
+  <ol>
+    <li>For every \(S^z\) pattern \(\sigma \in \{\pm 1\}^{\text{support}}\) (each a
+      would-be ice state), it performs a depth-\(N\) search over the available string
+      terms, evolving the configuration hop by hop.</li>
+    <li>A branch is kept only if every <em>intermediate</em> state carries spinons
+      (lies in \(Q\)), the final state returns every incident tetrahedron to zero
+      charge (a closed loop), and the touched sites are connected on the interaction
+      graph (linked-cluster).</li>
+    <li>Each surviving ordering contributes
+      \(\bigl(\textstyle\prod \text{couplings}\bigr)\cdot
+        \prod_k \frac{-1}{E_k}\), where \(E_k\) is the virtual spinon energy after
+      \(k\) hops. Since \(\sigma\) is (locally) an ice state, these energies depend
+      only on the hop-induced charges and are therefore
+      <strong>background-independent</strong>.</li>
+    <li>Diagonal \(S^z\) factors in a term multiply the amplitude by their
+      (configuration-dependent) eigenvalues.</li>
+    <li>The accumulated amplitudes, as functions of \(\sigma\), are mapped back to
+      operators by a <strong>Walsh/Fourier transform</strong> (using
+      \(\sigma_i = 2 S^z_i\)): a diagonal polynomial in the \(S^z\) of the support,
+      plus one ladder monomial per off-diagonal flip channel (with any \(S^z\)
+      dressing on the spectator sites).</li>
+  </ol>
+  <div class="note">
+    <strong>Symbolic by construction.</strong> Couplings and virtual energies are
+    <code>sympy</code> expressions carrying per-sublattice (and, in general,
+    per-bond) symbols. The noncommutative operator <em>structure</em> is represented
+    with the <a href="https://pypi.org/project/Commutation/">Commutation</a> package,
+    which also renders LaTeX. Disorder is just “more symbols”.
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section id="architecture">
+  <h2>Architecture</h2>
+  <table>
+    <thead><tr><th>Module</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">rsqsi/geometry/</td><td>Vendored pyrochlore/diamond geometry: sites, tetrahedra (0-cells, A=up / B=down), hexagonal plaquettes, bonds.</td></tr>
+      <tr><td class="mono">lattice_model.py</td><td><code>IceModel</code> — the general-ice core (sites, tetras, bonds, rings, reference ice state, \(J_{zz}\) symbols) — and <code>build_pyrochlore</code>.</td></tr>
+      <tr><td class="mono">terms.py</td><td><code>StringTerm</code> (a 1-chain + optional \(S^z\) factors + coupling), the channel constructors, and the <code>place_on_*</code> replicators.</td></tr>
+      <tr><td class="mono">states.py</td><td>Spin-½ configurations and the action of a string term: evolved config + diagonal \(S^z\) factor, or annihilation.</td></tr>
+      <tr><td class="mono">bw.py</td><td>The BW generator: loop enumeration + permutation sum + Walsh fit. Entry point <code>generate_bw(model, V, N, support)</code>.</td></tr>
+      <tr><td class="mono">operators.py</td><td>Renders results as <code>Commutation</code> operator monomials and LaTeX (symbolic coefficients stay in sympy).</td></tr>
+      <tr><td class="mono">compute_RS_series.py</td><td>Driver reproducing the N=2 and N=3 results and the arbitrary-term demos.</td></tr>
+      <tr><td class="mono">tests/</td><td><code>test_xxz.py</code> (thesis validation) and <code>test_arbitrary.py</code> (general terms).</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ================================================================= -->
+<section id="validation">
+  <h2>Validation</h2>
+  <p>
+    The engine reproduces the breathing-pyrochlore XXZ worked example exactly.
+    Note the virtual spinons sit on the sublattice <em>opposite</em> to the active
+    bond — hence the A↔B crossing in the denominators — which emerges automatically
+    from the geometry.
+  </p>
+  <table>
+    <thead><tr><th>Order</th><th>Generated term</th><th>Thesis</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>N = 2</td>
+        <td>A-bond Ising \( \dfrac{2\,J_{\pm,A}^2}{J_{zz,B}}\,S^z_i S^z_j\) (B-bond: A↔B)</td>
+        <td>\(\propto J_\pm^2/J_{zz}\; S^z S^z\)</td>
+      </tr>
+      <tr>
+        <td>N = 3</td>
+        <td>ring exchange \(3!\bigl(\tfrac{J_{\pm,A}^3}{J_{zz,B}^2}+\tfrac{J_{\pm,B}^3}{J_{zz,A}^2}\bigr)\,\mathcal O_p\)</td>
+        <td>identical</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Running the driver prints, among other things:</p>
+<pre><code class="language-text">[N=3] hexagon [9, 10, 17, 20, 26, 28]:
+   ring-exchange coefficient of O_p: 6*J_pm_A**3/J_zz_B**2 + 6*J_pm_B**3/J_zz_A**2
+   (thesis: 3! J_pm,B^3/J_zz,A^2 + 3! J_pm,A^3/J_zz,B^2)</code></pre>
+</section>
+
+<!-- ================================================================= -->
+<section id="arbitrary">
+  <h2>Arbitrary off-diagonal terms</h2>
+  <p>
+    The engine consumes any <code>list[StringTerm]</code>. A <code>StringTerm</code>
+    is a product of ladder operators (<code>factors</code>, each <code>(site, ±1)</code>
+    for \(S^\pm\)) with an optional set of diagonal \(S^z\) factors
+    (<code>sz_sites</code>) and a symbolic <code>coupling</code> — enough to express
+    any off-diagonal spin term. The \(S^z\) factors contribute their
+    configuration-dependent eigenvalues to the amplitude, so \(J_{z\pm}\)-type and
+    decorated operators arise automatically.
+  </p>
+  <p>Every channel of the generic QSI Hamiltonian is a one-liner:</p>
+<pre><code class="language-python">from rsqsi.terms import StringTerm, hop, pmpm, field, zpm
+
+hop(i, j, Jpm)                                  # S⁺_i S⁻_j
+pmpm(i, j, Jpmpm)                               # S⁺_i S⁺_j
+field(j, h)                                     # [S⁺_j, S⁻_j]   (h Sˣ_j)
+zpm(n, o, +1, Jzpm)                             # Sᶻ_n S⁺_o
+StringTerm(((a, +1), (c, -1)), g, sz_sites=(k,))  # g · Sᶻ_k S⁺_a S⁻_c   (+ .dagger())</code></pre>
+  <p>
+    Spread a local template across the lattice with the replicators
+    <code>place_on_bonds(model, factory)</code> /
+    <code>place_on_sites(model, factory)</code> (factories receive the model, so they
+    can reach neighbours for dressings). For anything the replicators do not cover,
+    build the <code>StringTerm</code>s directly.
+  </p>
+
+  <h3>Example checks</h3>
+  <div class="grid2">
+    <div class="panel">
+      <strong>Transverse field, \(N=2\)</strong>
+      <div class="eq">\[ -\,\frac{2h^2}{J_{zz,A}+J_{zz,B}} \]</div>
+      <p class="muted">The site lies on one A and one B tetrahedron, so both
+      \(J_{zz}\) enter the denominator.</p>
+    </div>
+    <div class="panel">
+      <strong>\(S^z\)-dressed hop</strong>
+      <p class="muted">A spectator \(S^z_k\) multiplies the plain-hop result by
+      \((S^z_k)^2 = \tfrac14\) and introduces no \(S^z_k\) dependence — an exact
+      spin-½ bookkeeping check the test suite asserts.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section id="usage">
+  <h2>Install &amp; run</h2>
+<pre><code class="language-bash">pip install -e .            # or: pip install sympy numpy Commutation
+python compute_RS_series.py # prints N=2 / N=3 results + LaTeX + demos
+pytest -q                   # 9 passed</code></pre>
+  <h3>Minimal API example</h3>
+<pre><code class="language-python">import sympy as sp
+from rsqsi.lattice_model import build_pyrochlore
+from rsqsi.terms import xxz_perturbation
+from rsqsi.bw import generate_bw
+
+model = build_pyrochlore(L=2)          # 32-site breathing-pyrochlore supercell
+V     = xxz_perturbation(model)        # Σ Jpm (S⁺S⁻ + h.c.), coupling per sublattice
+
+hexagon = frozenset(model.rings[0].members)
+res = generate_bw(model, V, N=3, support=hexagon)
+
+print(sp.simplify(res.ring_coefficient()))
+# 6*J_pm_A**3/J_zz_B**2 + 6*J_pm_B**3/J_zz_A**2</code></pre>
+</section>
+
+<!-- ================================================================= -->
+<section id="roadmap">
+  <h2>Roadmap</h2>
+  <p>Deferred to later increments:</p>
+  <div class="pill-row">
+    <span class="pill">RS reducible counter-terms (\(G_0^{(n)}\), \(E^{(n)}\))</span>
+    <span class="pill">\(J_{z\pm}\) complex ring flips → \(g + ig'\)</span>
+    <span class="pill">decorated \(\xi\,S^zS^z\mathcal O_p\) terms</span>
+    <span class="pill">numeric disorder-realization evaluator</span>
+    <span class="pill">whole-lattice loop enumeration</span>
+    <span class="pill">more IceModel instances (1D TFIM, …)</span>
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section id="refs">
+  <h2>References</h2>
+  <ul>
+    <li>A. Sanders, <em>PhD thesis</em> (2026) — Ch.&nbsp;1 “Perturbative quantum spin
+      ice” and Appendix&nbsp;B “Details of the perturbative expansion”.</li>
+    <li>M. Hermele, M. P. A. Fisher, L. Balents, <em>Pyrochlore photons</em>,
+      Phys. Rev. B <strong>69</strong>, 064404 (2004).</li>
+    <li>S. Bravyi, D. DiVincenzo, D. Loss, <em>Schrieffer–Wolff transformation</em>,
+      Ann. Phys. <strong>326</strong>, 2793 (2011) — linked-cluster theorem.</li>
+    <li>Operator algebra: the
+      <a href="https://pypi.org/project/Commutation/">Commutation</a> package
+      (GitHub <code>Spuriosity1/Commutation</code>).</li>
+  </ul>
+</section>
+
+<footer>
+  <p>Generated documentation for <strong>rsqsi</strong> — Rayleigh–Schrödinger
+  effective-Hamiltonian term generator for disordered quantum spin ice. Static site;
+  deploy by serving <code>./docs/</code> on any static host (e.g. GitHub Pages).</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  // activate code highlighting
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.hljs) { hljs.highlightAll(); }
+
+    // scroll-spy for the sidebar
+    var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+    var sections = links.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+    function onScroll() {
+      var pos = window.scrollY + 120;
+      var current = sections.length - 1;
+      for (var i = 0; i < sections.length; i++) {
+        if (sections[i] && sections[i].offsetTop > pos) { current = i - 1; break; }
+      }
+      links.forEach(function (a, i) { a.classList.toggle('active', i === current); });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  });
+</script>
+</body>
+</html>
