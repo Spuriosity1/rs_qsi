@@ -39,7 +39,7 @@
 
 <main>
 <header class="hero">
-  <h1>Effective Hamiltonians for <span class="accent">disordered quantum spin ice</span></h1>
+  <h1>Effective Hamiltonians for <span class="accent">generic ice models</span></h1>
   <p class="lede">A Python engine that generates terms of the Rayleigh–Schrödinger
   series for the effective Hamiltonian \(H_{\mathrm{eff}}\) of quantum spin ice,
   with fully symbolic couplings — ready for spatial disorder.</p>
@@ -55,35 +55,354 @@
 <section id="overview">
   <h2>Overview</h2>
   <p>
-    Quantum spin ice (QSI) is a candidate \(U(1)\) quantum spin liquid on the
-    pyrochlore lattice. Its low-energy physics is governed by an
-    <em>effective Hamiltonian</em> obtained by degenerate perturbation theory within
-    the extensively-degenerate “2-in-2-out” ice manifold: a transverse coupling
-    \(V\) is treated as a perturbation on top of the dominant Ising interaction
-    \(H_0\), generating ring-exchange and higher processes order by order.
+    Ice models -- water ice, spin ice, the checkerboard antiferromagnet, and
+    indeed Kagome ice -- are an intuitive recipe for emergent gauge
+    theories in classical and quantum spin liquids.
+  </p>
+  <p>
+    This repo defines a 'generalised ice model' as a special case of the 
+    <a href="https://arxiv.org/abs/2305.00155">constrainer Hamiltonian</a>
+    \[ H_0 = \sum_{t} J_t \mathcal{C}_{t}^2,\hspace{4em} \mathcal{C}_{t}=\sum_{j\in
+    t} \eta_{j,t}S^z_j\] where the sum over \(t\) runs over all of the
+    constraints, the coupling constants \(J_t>0 \forall t\), and the scalars \(\eta_{j,t} = \pm 1\). In fact, we require slightly more — the \(\eta_{j,t}\)'s must be interpretable as the 
+    <a href="https://arxiv.org/pdf/2608.05186">incidence numbers of a chain complex</a>. Stated otherwise, there must be a globally consistent way to understand \(\mathcal{C}_t\) as a lattice divergence
+    \(\mathcal{C}_t=\nabla\cdot\,S^z~.\)
+  </p>
+
+  <p>
+    In traditional pyrochlore spin ice, these 'constraints' are the tetrahedra, and the \(\eta_{j,t}\) are
+    +1 if \(t\) is pointing 'up', -1 if \(t\) points 'down'. Though the sign
+    factor makes no difference at the level of the Hamiltonian, this conveniton
+    allows the \(\mathcal{C}_t\)'s to be understood as conserved charges counting the spinon
+    number.
   </p>
   <p>
     This project implements the <strong>“general procedure for generating
-    terms”</strong> from the PhD thesis (Sanders 2026, Ch.&nbsp;1 and Appendix&nbsp;B).
-    The goal is a <em>general</em> tool: given any off-diagonal perturbation on any
-    ice lattice, it produces the symbolic effective operators — with per-site /
-    per-bond couplings, so that spatial <strong>disorder</strong> enters simply as
-    distinct coupling symbols that can later be evaluated numerically.
+      terms”</strong> from the PhD thesis (Sanders 2026, Ch.&nbsp;1 and
+    Appendix&nbsp;B). The goal is a general tool: given any off-diagonal
+    perturbation on any ice lattice, it symbolically integrates out all
+    violations of the ice manifold to produce a series of symbolic effective
+    operators up to arbitrary order in \(V\), which act within the ice manifold.
   </p>
-  <div class="note">
-    <strong>Status.</strong> Increment&nbsp;1 implements the Brillouin–Wigner
-    connected-loop term \(V\,(Q G_0 V)^{n-1}\) at \(E_0\) — the part that generates
-    all new operator structures — and now accepts an <strong>arbitrary</strong>
-    off-diagonal term (ladder operators dressed with \(S^z\) factors). It is
-    validated against the breathing-pyrochlore XXZ results in the thesis.
-  </div>
 </section>
 
 <!-- ================================================================= -->
 <section id="theory">
+  <h2>Cell complexes for children</h2>
+
+This section is a very slight refactoring of standard simplicial homology theory — the construction here differs only in that the elementary cells are not necessarily (hyper)triangular
+~\cite{masseyBasicCourseAlgebraic1991}. The familiar reader will recognise this as a special case of singular homology in CW complexes. The technical points of difference between these formalisms are not important to the present discussion.
+
+To begin with, we will define the abstract notion of a \textit{lattice}. We require more structure than a simple periodic array of points, rather we will think of a hierarchy of oriented, primitive, non-decomposable objects
+$$
+\{ \rm Volumes \} \supset \{\rm Plaquettes\} \supset \{\rm Links \} \supset \{\rm Vertices \}~.
+$$
+We call an elementary $r$-dimensional object an \textit{$r$-cell}, and write $\mathcal{K}_{r}$ for the set or elementary, oriented objects. The elementary voids, plaquettes, links and vertices of a lattice are the 3, 2, 1, and 0-cells respectively. 
+
+The boundary of an $r$-cell is a formal sum of several lower-dimensional hulls traversed in a particular order, see Fig.~\ref{fig:basic_quadri_rchain}. We therefore introduce the notion of an $r$-chain:
+
+\begin{definition}[$r$-chain] 
+    An $r$-chain $c_r$ is a formal, $\mathbb{Z}$-valued linear combination of $r-$cells 
+    \[
+        c_r = \sum_{\sigma_r \in \mathcal{K}_r} c_r(\sigma_r) \sigma_r~.
+    \]
+    We call the set of all possible $r$-chains $C_r$.
+\end{definition}
+
+In situations where orientation is unimportant, we write $\sigma \in c_r$ to mean that the $r$-cell $\sigma$ has a nonzero coefficient in the chain $c_r \in C_r$.
+
+The set $\mathcal{K}_r$ plays the role of a basis for the $\mathbb{Z}$-module $C_r$.
+In this finite-dimensional setting, there is an obvious isomorphism in which the $r$-chain $c_r$ can be though of as an $r$-cochain $c^r \in C^r$, i.e. a map
+\begin{align}
+    c^r : \mathcal{K}_r &\to \mathbb{Z}\\
+    \sigma  & \mapsto \text{Coefficient of }\sigma\text{ in }c_r \nonumber~.
+\end{align}
+We will therefore refer to the two as essentially synonymous, and use the notations $X(r)$ and $X_r$ interchangeably for cochains.
+
+<p>
+We now aim to implement vector calculus on the chain complex. The final piece of structure comes from the boundary operator $\partial : C_r \to C_{r-1}$; these being chosen such that for any given cell $\sigma_r \in \mathcal{K}_r$, its boundary $\partial (\sigma_r)$ may be thought of as an $r-1$ chain. 
+
+\begin{definition}[Cell Complex]
+A finite-dimensional cell chain complex is a collection of sets
+\begin{align}
+&C_n \xrightarrow{\partial} C_{n-1} \xrightarrow{\partial} ... \xrightarrow{\partial} C_0
+\end{align}
+with maps $\partial_n : C_n \to C_{n-1}$ such that
+\begin{enumerate}
+    \item (finite-dimensional) There exists a maximum cell dimension $n\in\mathbb{Z}$, and
+    \item (exact) $\partial^{2} = 0$.
+\end{enumerate}
+\end{definition}
+
+Subtly, all of the orientation information in the complex is specified by the explicit form of the maps $\partial$.
+For practical calculations, it is convenient to express $\partial$ as a matrix with respect to the bases $\{\mathcal{K}_{r-1}, \mathcal{K}_{r}\}$. Let $\tau_{r-1} \in \mathcal{K}_{r-1},\sigma_{r}\in\mathcal{K}_{r}$ be elementary cells, and define the \textit{incidence numbers}
+$$
+\iota_{\tau_{r-1}\sigma_{r}} = \begin{cases}1 & {\tau_{r-1} \subset \sigma_{r}},~\text{correct orientation}\\ 
+    -1 & {\tau_{r-1} \subset \sigma_{r}},~\text{wrong orientation}\\ 
+0 & \text{else} \end{cases}
+$$
+which we use to define the $\mathbb{Z}$-linear operator $\partial$,
+\begin{align} 
+    \partial c^{r}(\tau_{r-1}) 
+%    &= \left[ \partial \sum_{\sigma_r \in \mathcal{K}_r} c^{r}(\sigma_r)  \sigma_r \right] (\tau_{r-1}) \\
+%                               &= \sum_{\sigma_r \in \mathcal{K}_r} c_{r}(\sigma_r) [ \partial\sigma_r ] (\tau_{r-1})  
+                               &= \sum_{\sigma_r \in \mathcal{K}_r} c^r(\sigma_r) \iota_{\tau_{r-1} \sigma_r} 
+\end{align}
+
+\begin{figure}
+    \begin{center}
+        \includegraphics[width=0.75\textwidth]{r_chain_compiled.pdf}
+    \end{center}
+\caption[Illustration of $\partial$ acting on the chain complex of a single quadrilateral.]{Illustration of $\partial$ acting on the chain complex of a single quadrilateral, consisting of a single plaquette in $\mathcal{K}_2$, four links in $\mathcal{K}_1$ and four vertices in $\mathcal{K}_0$. Note that our formulation assigns a reference orientation to each cell, rather than including two `copies' of each cell for the two possible orientations, as is standard practice in e.g. Ref.~\cite{masseyBasicCourseAlgebraic1991}.
+}\label{fig:basic_quadri_rchain}
+\end{figure}
+
+\begin{figure}
+    \begin{center}
+        \includegraphics{diamond_convention_compiled.pdf}
+    \end{center}
+    \caption[Standard diamond lattice orientation for the basis $r$-cells $\mathcal{K}_r$.]{Standard diamond lattice orientation for the basis $r$-cells $\mathcal{K}_r$. The 3-cell in panel d) is considered $\Down$ on the dual lattice.}\label{fig:std_diamond_orientation}
+\end{figure}
+
+
+\begin{tcolorbox}
+    \textbf{Diamond chain complex.}
+    For the diamond lattice, setting up the complex consists mainly of choosing orientation conventions for all of the constituent $r-$cells and then specifying $\partial$ such that it respects a right-hand rule. The standard choice shown in Fig.~\ref{fig:std_diamond_orientation} reads as follows:
+
+\begin{itemize}
+    \item 0-cells, i.e. the centers of tetrahedra, have no orientation.
+    \item 1-cells $\sigma_1 \in \mathcal{K}_1$ point from $\Up$ tetrahedra to $\Down$.
+    \item 2-cell normal vectors point from $\Up$ to $\Down$ on the dual lattice.
+    \item 3-cells always take the outward normal.
+\end{itemize}
+
+Notice that the orientation convention for the 2-cells is intimately tied to the 1-cells: if inversion symmetry is broken by making $\Up$ and $\Down$ tetrahedra (0-cells) are distinguishable, then the corresponding voids (3-cells) necessarily become distinguishable. This observation will become especially important in Chapter 2, where inversion symmetry is broken explicitly.
+\end{tcolorbox}
+
+\subsection{Lattice operators}
+\label{sec:lattice_ops}
+
+We now generalise the notion of an $r$-(co)chain to include operators on a Hilbert space.
+
+\begin{definition}[lattice field]
+    Let $R$ be a ring.
+    An $R$-valued $r$-(lattice) field is a ring homomorphism 
+    \begin{displaymath}
+        F : C_r \to R~.
+    \end{displaymath}
+    We write $C^r(R)$ for the space of $R$-valued $r$-fields.
+\end{definition}
+
+A lattice field can be uniquely specified by its action on all of the basis $r$-cells, via
+\begin{align}    
+    F: C_r &\to R \\
+    F(c_r) &= \sum_{\sigma\in\mathcal{K}_r} c^r(\sigma)F(\sigma)~.\nonumber
+    \label{eq:rchain_spc}
+\end{align}
+
+Note that a $\mathbb{Z}$-valued $r$-lattice field is simply an $r$-cochain.
+
+\begin{definition}
+    The boundary operator $\partial$ acts on a lattice $r$-field $F$ to produce the $(r-1)$-field $\partial F$,
+    \begin{displaymath} 
+        \partial F(\tau_{r-1}) = \sum\limits_{\sigma_{r}\in \mathcal{K}_{r}} \iota_{\tau_{r-1},\sigma_r}F(\sigma_{r})~.
+    \end{displaymath} 
+\end{definition}
+
+%Exactness manifests as the identity
+%$$\sum\limits_{c_{r}}\iota_{c_{r-1}, c_{r}}\iota_{c_{r}, c_{r+1}} = 0 \Leftrightarrow \partial^2=0~.$$
+
+Dual to $\partial$ is the \textit{coboundary operator} $\delta$,  $\delta_n: C_{n-1} \to C_{n}$. With respect to a particular choice of basis $\mathcal{K}_r$, it is defined as 
+\begin{equation} 
+\delta F(\sigma_{r+1}) = \sum\limits_{\tau_{r} \in \mathcal{K}_{r}} \iota_{\tau_{r},\sigma_{r+1}}F(\tau_{r}).
+    \label{eq:coboundary_def}
+\end{equation}
+This definition is made such that, given $c_r\in C_r$, and $b_{r-1} \in C_{r-1}$, 
+$[\partial c_{r}](b_{r-1}) = c_r(\delta b_{r-1}).$ Thought of as large, rectangular matrices, the coboundary $\delta$ is simply the transpose of the boundary.
+
+
+\subsection{The dual lattice \label{sec:dual_lat}}
+
+Starting with an abstract chain complex $C_r$ there is a canonical way to formally construct a \textit{dual complex} $\bar{C}_r$, in which the $r$-chains of the original lattice become the $(d-r)$-chains of the dual.
+
+Formally defining a chain complex is equivalent to specifying all incidence numbers. We construct these based on the principle that for a $d$-dimensional complex, $\bar{c}_{r} \simeq c_{d-r}$,
+\begin{equation}    
+\iota_{\bar{\sigma}_{r}\bar{\sigma}_{r+1}} = \iota_{\sigma_{d-r-1},\sigma_{d-r}}~.
+\label{eq:dual_incidence}
+\end{equation}
+
+A given $r$-chain $F \in C_r$ may be mapped to $\bar{C}_r$ by simply defining $\star F(\bar{c}_r) \deq F(c_{d-r})$. One may then straightforwardly derive the identities
+\begin{align}
+     \partial \star F(\bar{c}_r) &= \delta F(c_{d-r}),~\text{and} \\
+    \delta \star F(\bar{c}_r) &= \partial F(c_{d-r})~,
+\end{align}
+where the equality above is as members of $X$, the target space. Thus we recover the famous $\delta = \star \partial \star$ from differential geometry. 
+The dual therefore contains the same connectivity information, with the roles of $\partial$ and $\delta$ reversed. One may also read immediately that all objects are invariant under $\star \star$, i.e. the `dual dual' lattice is simply the original lattice.
+
+From this very abstract discussion, it is not immediately obvious that the dual lattice can be embedded `naturally' in ordinary space. For the special cases of the diamond lattice, it so happens that the dual lattice is isomorphic to the original lattice -- the diamond plaquette centroids are themselves distributed on a pyrochlore lattice. This is not the case on e.g. the honeycomb, which is dual to the triangle lattice and vice versa.
+
+\subsection{Integration and Stokes' theorem}
+
+Having introduced the necessary machinery, we now come to the most important result -- the discretised lattice Stokes' theorem. The lattice equivalent of integrating over a submanifold $\Omega$ is summation: if $F$ is an $r$-field, then
+\begin{equation}
+    \sum_{c_r \in \Omega_r} F(c_r) \equiv \sum_{\sigma_r \in \mathcal{K}_r} c_{\sigma_r} F(c_{\sigma_r}) 
+    \label{eq:integral}
+\end{equation}
+represents a sum over the elementary cells, weighted by the coefficient of $c_r$ in $\Omega_r$ which implement the concept of orientation.
+
+\begin{theorem}[Lattice Stokes' theorem]
+    \label{thm:lattice_stokes}
+    Let $\Omega_r$ be an $r$-chain, and $F : C_{r-1} \to R$ a generic lattice field. Then
+    \begin{align}
+        \sum_{ \sigma_{r-1} \in \partial \Omega_r } F(\sigma_{r-1})  = \sum_{\sigma_{r} \in \Omega_r} \delta F(\sigma_r) ~.
+    \end{align}
+
+    A similar identity holds when $\partial$ and $\delta$ are exchanged,
+        \[
+            \sum_{ \sigma_{r+1} \in \delta \Omega_r } F(\sigma_{r+1})  = \sum_{\sigma_r \in \Omega_r } \partial F(\sigma_r)~.
+        \]
+\end{theorem}
+
+\begin{proof}
+    One need simply choose a basis, and then expand definitions:
+    \begin{align}
+        \sum_{ \sigma_{r-1} \in \partial \Omega_r } F(\sigma_{r-1}) 
+        &\equiv  F(\partial \Omega_r)~, \\
+        = \sum_{\sigma_{r-1}  \in \mathcal{K}_{r-1}} \sum_{\tau_r \in \mathcal{K}_{r}} \iota_{\sigma_{r-1} \tau_r} \Omega_r(\tau_{r}) F(\sigma_{r-1})
+        &\equiv \delta F ( \Omega_r ) ~= \sum_{\sigma_{r} \in \Omega_r} \delta F(\sigma_r) ~.
+    \end{align}
+\end{proof}
+
+
+  <h2>Chain reformulation of the ice problem</h2>
+
+  <p>
+Consider a real-valued 1-field $E\in C^1(\mathbb{R})$, representing an electric field in standard Maxwell electromagnetism in 3+1D, and the $\mathbb{R}$-valued 0-field $\phi$ for the scalar potential. The definition
+$$E \deq -\delta \phi = -\star \partial \star \phi$$
+is sufficient to immediately and unambiguously translate $E = - d \phi$ from the usual non-relativistic formulation of classical electromagnetism, in which the base manifold is $\mathbb{R}^3$, $E$ and the vector potential $A$ are 1-forms, and the magnetic field $B$ is a 2-form formally independent of $E$~\cite{frankelGeometryPhysicsIntroduction2011}. Likewise, the magnetic field takes the obvious form $ B = \delta A$.
+  </p>
+
+  <p> 
+Introduce the operator-valued monopole charge 0-field $Q$, which can be expressed in terms of the 1-field $S^z$ as
+\begin{equation}
+    Q = \partial S^z~.
+    \label{eq:generalised_ice}
+\end{equation}
+Comparing with the original definition from the diamond lattice, Eq.~\eqref{eq:monopole_op}, we see that the role of $\eta_t$ is now absorbed into the orientation convention. This construction exhibits the geometric origin of monopole charge conservation without appealing to any particular lattice structure. In general, there is no guarantee that $Q$ has any particular physical meaning -- for this, we must postulate a form for Hamiltonian:
+
+\begin{definition}[General ice problem]
+    \label{def:gen_ice}
+    A generic, classical ice model on the cell complex $\mathcal{K}_n$ places a spin on each link $l \in \mathcal{K}_1$. These spins interact under the Hamiltonian
+    \begin{displaymath}
+        H = \sum_{t \in \mathcal{K}_0} \frac{J_\|(t)}{2}(\partial S^z (t) )^2~.
+    \end{displaymath}
+    The $J_\|(t)$ are real, positive, possibly $t$-dependent constants. Stated otherwise, $J_\| \in C^0(\mathbb{R})$.
+\end{definition}
+
+ \begin{figure}
+    \begin{center}
+        \includegraphics{generic_ice_compiled.pdf}
+    \end{center}
+    \caption[Generalised ice models and formulation of the 1D chain as spin ice.]{a) A generic ice model, showing the physical nearest-neighbour bonds $\langle ij \rangle$ in red connecting nearest-neighbour `links' of a parent lattice (thick, black lines).
+Each black vertex has an even number of links, guaranteeing a unique charge configuration in the ground state.
+b) A uniform Ising chain, written as an ice model. Two domain walls are shown, now thought of as a spinon/antispinon pair (red, blue circles)
+    }\label{fig:generic_ice}
+ \end{figure}
+
+This can be recognised as a special case of the general constrainer Hamiltonian for classical spin liquids introduced by Ref.~\cite{yanClassificationClassicalSpin2023}. For now, we will limit the discussion to the case that each 0-cell has an even number of bonds (in the spin language, each corner-sharing polyhedron has an even number of spins), which renders $Q$ integer valued and so ensures that the ground state charge configuration is unique. The half-integer case introduces additional complexity, which will be duly discussed in Chapter 4.
+Notice that, after a suitable local change of basis, an arbitrary Ising chain can be formulated as an ice model as in Fig.~\ref{fig:generic_ice}b), with the spinons identified as domain walls.
+
+%%
+Now consider the operators which create spinon-antispinon pairs. These operators act by flipping spins along a path, generating excitations at the endpoints. 
+
+\begin{definition}
+    \label{def:string_operator}
+    Let a collection of spin $S$ spins lie on the links (1-cells) of a lattice, with their $S^z$ axes thought of as \textit{oriented} in the same way at the basis links $l \in \Links$. Given a 1-chain $\gamma \in C_1$, define the \textit{string operator}
+
+    \begin{align}\label{eq:string_operator}
+        \mathcal{O}(\gamma) &= \prod_{l \in \gamma} \frac{S^{l}}{\tilde{s}},
+    \end{align}
+    where $$S^{l} = \begin{cases}
+        [S^{+}]^{|\gamma(l)|} & \gamma(l) > 0\\
+        [S^{-}]^{|\gamma(l)|} & \gamma(l) < 0\\
+        1 & \gamma(l)=0,
+    \end{cases}$$
+    and $\tilde{s} \deq S+\frac{1}{2}$.   
+\end{definition}
+
+These operators act non-trivially only on the spins along the support of $\gamma$. When applied to an ice state -- i.e. a state satisfying $\partial S^z(t) \ket{\psi} = 0 \forall t$ -- they generically introduce Gauss law violations at the endpoints of $\gamma$. To make this precise, we consider how $\mathcal{O}(\gamma)$ interacts with the charge operator.
+
+\begin{lemma}[Charge transport by strings]
+    \label{lem:string_charge}
+    Let $\gamma \in C_1$ be a string. 
+Making use of $[S^z(\sigma), S^{l(\sigma})] = l(\sigma)S^{l(\sigma)} $, we derive the identity
+\begin{align}
+    [ \partial S^z (t), \mathcal{O}(\gamma) ] 
+    & = \sum_{l'} \iota_{t l'} [S^z_{l'}, S^{\gamma(l')}] \prod_{l \neq l'} S^{\gamma(l)}_l \nonumber\\
+    & = (\partial \gamma)(t) \mathcal{O}(\gamma) \label{eq:closed_charge}
+\end{align}
+It follows immediately that string operators preserve all charges if and only if $\partial \gamma = 0$, i.e. they are loops.
+\end{lemma}
+
+Though $\mathcal{O}$ resembles an exponential map, i.e. a group homomorphism between 1-chains under addition and spin operators under multiplication, it is not quite so simple. The non-invertibility of the spin ladder operators introduces certain caveats. If one attempts to add 1-chain $\gamma$ to $\eta$, then $\mathcal{O}(\gamma + \eta)$ generally only factorises into $\mathcal{O}(\gamma)\mathcal{O}(\eta)$ when $\gamma$ and $\eta$ are disjoint. Nonetheless, we can derive a precise identity --
+
+\begin{lemma}[Cancellation of lines]
+    \label{lem:cancellation_lines}
+    Let $S=\frac{1}{2}$. Then, so long as both $\mathcal{O}(\gamma)$ and $\mathcal{O}(\eta)$ are nonzero,
+    \begin{align}
+        \mathcal{O}(\gamma) \mathcal{O}(\eta)  &= \mathcal{O}( \gamma + \eta ) \prod_{l \in \gamma\cap \eta} \left[\frac{1}{2} + \gamma(l) S^z_l \right]~.
+        \label{eq:string_cat}
+    \end{align} 
+    \label{lem:cancel}
+\end{lemma}
+
+\begin{proof}
+    For each link $l \in \mathcal{K}_1$, there are only cases to
+    consider -- i) $\gamma(l) = 0$ or $\eta(l)=0$, and so one of the operators
+    is trivial, or ii) $\gamma(l) \neq 0$ and $\eta(l) \neq 0$. Supposing that $\gamma(l) = \pm1$ and $\eta(l) = \mp1$, the identity $S^\pm S^\mp = \frac{1}{2} \mp S^z$ provides the required form.  Otherwise, if $\gamma(l)+\eta(l) \neq 0$, then $\mathcal{O}(\eta + \gamma)$ necessarily annihilates all states and so both sides of the equation vanish. 
+
+\end{proof}
+
+This lemma illustrates that string operators `interfere' with one another. In particular, when two strings partially overlap with opposite orientations, they either restore the spin to its original eigenvalue or annihilate the state entirely. This makes the space of string operators non-Abelian under na\"ive multiplication, even in the absence of any background gauge field.
+
+The picture simplifies in the semiclassical limit. If $|S^z|/S$ is small, then we have $S^+S^- \simeq S(S+1) + O( S (\frac{S^z}{S})) $; in other words a constant as $S\to \infty$. In this limit, all of the string operators commute with one another, revealing $\mathcal{O}$ to be the Wilson line of an Abelian lattice gauge theory. In this case $\mathcal{O}$ becomes a homomorphism between the spin algebra (viewed as a $\mathbb{Z}$-module under operator multiplication) and the $\mathbb{Z}$-module of 1-chains. If $p_1$ and $p_2$ are elementary plaquettes, then $\mathcal{O}(\partial p_1) \mathcal{O}(\partial p_2) = \mathcal{O}(\partial (p_1 + p_2))$ -- in other words, $\mathcal{O}$ behaves like a Wilson loop.
+
+In the realistic case $S=\frac{1}{2}$, however, the string vanishes if any coefficient in $\gamma$ exceeds $|\gamma(l)| > 1$. From this it is easy to see that oriented paths on the lattice (i.e. 1-chains made of only $c_l \in \{-1,0,1\}$) are in one-to-one correspondence with the string operators $\mathcal{O}(\gamma)$. 
+
+Interestingly, $\mathcal{O}$ retains its Abelian character even at $S=\frac{1}{2}$ if the loops are suitably arranged. Suppose $p_1$ and $p_2$ are adjacent elementary plaquettes sharing exactly one link $l'$, where $l'$ is traversed in opposite directions on $\partial p_1$ and $\partial p_2$. The symmetrised product satisfies
+\begin{align*}
+    \mathcal{O}(\partial p_1)\mathcal{O}(\partial p_2) + \mathcal{O}(\partial p_2)\mathcal{O}(\partial p_1) 
+    &= \mathcal{O}(\partial[p_1 + p_2]) \left[ \frac{1}{2}\pm S^z_{l'} + \frac{1}{2}\mp S^z_{l'} \right] \\
+    &= \mathcal{O}(\partial[p_1 + p_2]),
+    \label{eq:additive_fields}
+\end{align*}
+revealing that we can at least in some sense construct extended Wilson loops by chaining plaquettes. We will return to this notion of symmetrised loops in Sec.~\ref{sec:frust_flux}.
+
+The loop operators, being in some sense conjugate to the charges, are essential to understanding the degeneracy of the ground state manifold. In the classical theory of Ref.~\cite{yanClassificationClassicalSpin2023}, they are exactly the fluctuators.
+
+\begin{theorem}
+    \label{thm:ice_loop}
+    Let $\mathcal{M}$ denote the set of ice states satisfying $Q_t=0\,\forall t \in \mathcal{K}_0$. 
+    Any two ice states $\ket{\psi}, \ket{\phi} \in \mathcal{M}$ may be connected by flipping closed
+loops of spins.  
+\end{theorem}
+
+\begin{proof}
+    Take two classical ice states $\ket{\psi}, \ket{\phi} \in \mathcal{M}$. For any $S$, the difference of $S^z$ eigenvalues between the states
+\begin{equation}
+    \gamma(l) = \bra{\psi} S^z_l \ket{\psi} - \bra{\phi} S^z_l \ket{\phi}
+\end{equation}
+defines an integer-valued 1-chain. One can then verify that $\mathcal{O}(\gamma) \ket{\phi}$ yields $\ket{\psi}$ up to normalisation. Since $Q_t$ is the same on all $t\in \mathcal{K}_0$, $[Q_t, \mathcal{O}(\gamma)] = 0$ for all $t\in \mathcal{K}_0$. Lemma \ref{lem:string_charge} then shows $\partial \gamma = 0$. $\gamma$ is therefore a (possibly disconnected) closed loop of spins.
+
+\end{proof}
+
+It follows that applying all possible loop operators to an arbitrary seed state $\ket{\psi_0}$ generates the entire ice manifold $\mathcal{M}$. If the cohomology group $$H^1 = \{ \text{closed loops} \} / \{ \text{loops that are boundaries of plaquettes} \}$$ is nontrivial, as is generally the case in periodic boundary conditions, then the elementary plaquette-flip operators are not enough to generate the full Hilbert space from a given seed state. This subtlety will play an important role in Sec.~\ref{sec:basis_algo}.
+
+
+
   <h2>Perturbative formalism</h2>
   <p>
-    Split the Hamiltonian into a diagonal part and a small off-diagonal
+  Start with the Brillouin-Wigner formalism. Split the Hamiltonian into a diagonal part and a small off-diagonal
     perturbation, \(H = H_0 + V\). For QSI,
   </p>
   <div class="eq">\[
@@ -92,7 +411,7 @@
     V = \text{off-diagonal (spinon-transport) terms}.
   \]</div>
   <p>
-    \(H_0\) counts the magnetic “charge” \(\partial S^z(t)=\sum_{i\in t}S^z_i\) on
+    \(H_0\) counts the magnetic “charge” \(\partial S^z(t)=\eta_t \sum_{i\in t}S^z_i\) on
     every tetrahedron \(t\); the ice manifold \(\mathcal M\) is its degenerate ground
     space (all \(\partial S^z(t)=0\)). With \(P\) the projector onto \(\mathcal M\),
     \(Q = 1-P\), and \(G_0(E) = [E-H_0]^{-1}\), the Brillouin–Wigner effective
@@ -103,43 +422,38 @@
       = P\bigl[\,V + V G_0(E) Q V + V G_0(E) Q V G_0(E) Q V + \cdots\bigr]P .
   \]</div>
   <p>
-    Expanding the energy dependence gives the Rayleigh–Schrödinger–Kato series,
+    Expanding both \(H_0\) energy dependence on \(V\) gives the Rayleigh–Schrödinger–Kato series,
   </p>
   <div class="eq">\[
     H_{\mathrm{eff}}^{(n)} = \!\!\sum_{\substack{m\ \text{factors of}\ V\\ m+\sum a = n}}\!\!
       V Q G_0^{(a_1)} V Q G_0^{(a_2)} \cdots V ,
   \]</div>
   <p>
-    whose leading, “irreducible” piece is the BW term \(V\,(Q G_0(E_0) V)^{n-1}\)
-    — the object this increment computes.
+  whose leading, “irreducible” piece is term \(V\,(Q G_0(E_0) V)^{n-1}\), identical to the BW expression <em>evaluated at \(E=E_0\)</em>.
   </p>
 
   <h3>String operators and the linked-cluster theorem</h3>
   <p>
-    Every off-diagonal term is a <em>string operator</em> — a product of ladder
-    operators along an oriented path \(\gamma\) on the lattice,
-    \( \mathcal O(\gamma)=\prod_{l\in\gamma} S^{\,l}/\tilde s\). Applied to an ice
-    state it creates spinons at the endpoints \(\partial\gamma\); it preserves the
-    ice manifold iff \(\gamma\) is a <em>closed loop</em>. The linked-cluster
-    theorem restricts \(H_{\mathrm{eff}}\) to <strong>connected</strong> clusters, so
-    at each order one only needs connected, closed loops of string operators.
-  </p>
+    The special form of an ice model -- a constrainer model having only 
+  <p>
+  If all constraints can be simultaneously set to zero -- as is the case in
+  <em>clean</em> spin ice -- then we immediately see that all loops must be
+  closed. If, however, any three-member or one-member constraints are present,
+  then the ground state sees not \(C_t=0\), but a "zero point" \(C_t=\pm
+  \tfrac12 \).
 </section>
 
 <!-- ================================================================= -->
 <section id="procedure">
   <h2>The generating procedure</h2>
-  <p>The thesis states the recipe for the order-\(N\) term as:</p>
-  <div class="panel">
     <ol>
       <li>Fix an order \(N\) — this sets the number of string-operator “paths”.</li>
-      <li>Arrange the paths into a <strong>connected, closed loop</strong> so that all
+      <li>Arrange the paths into a <strong>connected, closed loop</strong> so that all gapped
         spinons are annihilated (linked-cluster).</li>
       <li>Write down the \(N!\) orderings of the chosen operator set; for each, compute
-        the virtual spinon energy entering every propagator factor \([-H_0]^{-1}\).</li>
+        the virtual spinon energy entering every propagator factor \([E-H_0]^{-1}\).</li>
       <li>Sum over all orderings.</li>
     </ol>
-  </div>
   <p>
     For the breathing-pyrochlore XXZ model the leading non-trivial order is
     \(N=3\): three two-site hops close into a hexagon and produce the canonical
@@ -165,7 +479,7 @@
       would-be ice state), it performs a depth-\(N\) search over the available string
       terms, evolving the configuration hop by hop.</li>
     <li>A branch is kept only if every <em>intermediate</em> state carries spinons
-      (lies in \(Q\)), the final state returns every incident tetrahedron to zero
+      (lies in \(\mathcal{M}^\perp\)), the final state returns every incident tetrahedron to zero
       charge (a closed loop), and the touched sites are connected on the interaction
       graph (linked-cluster).</li>
     <li>Each surviving ordering contributes
@@ -214,7 +528,7 @@
   <h2>Validation</h2>
   <p>
     The engine reproduces the breathing-pyrochlore XXZ worked example exactly.
-    Note the virtual spinons sit on the sublattice <em>opposite</em> to the active
+    Note the virtual spinons sit on the sublattice <em>opposite</em> to the $J_\pm$
     bond — hence the A↔B crossing in the denominators — which emerges automatically
     from the geometry.
   </p>

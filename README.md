@@ -54,8 +54,9 @@ wrappers. For anything the replicators don't cover, build the `StringTerm`s dire
 - `rsqsi/states.py` — S^z configurations and ladder-operator action (spin-1/2).
 - `rsqsi/bw.py` — the BW generator (loop enumeration + permutation sum →
   operator fit). Core engine; `generate_bw(model, V, N, support)`.
-- `rsqsi/operators.py` — renders results as `Commutation` operator monomials +
-  LaTeX (symbolic coefficients stay in sympy).
+- `rsqsi/operators.py` — renders results as a single `Commutation` expression +
+  LaTeX (the symbolic couplings ride along as each term's sympy multiplier,
+  using `Commutation` 2.0.0's SymPy-scalar support).
 - `compute_RS_series.py` — driver reproducing the N=2 and N=3 results.
 - `tests/test_xxz.py` — validation suite.
 

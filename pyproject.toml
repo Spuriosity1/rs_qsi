@@ -10,14 +10,14 @@ requires-python = ">=3.10"
 dependencies = [
     "sympy",
     "numpy",
-    "Commutation>=1.5.1",
+    "Commutation>=2.0.0",
 ]
 
 [project.optional-dependencies]
 test = ["pytest"]
 
 [tool.setuptools]
-packages = ["rsqsi", "rsqsi.geometry"]
+packages = ["rsqsi"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
