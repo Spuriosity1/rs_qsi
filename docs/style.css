@@ -111,6 +111,12 @@ li { margin: .3rem 0; }
 }
 .note strong { color: var(--text); }
 
+embed.isvg {
+    display: block;
+    margin: auto;
+    width: 100%;
+}
+
 /* code */
 pre {
   background: var(--code-bg);
