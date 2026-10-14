@@ -15,8 +15,8 @@ import numpy as np
 import pytest
 import sympy as sp
 
-import lattice as lat
-import brillouin_wigner as bw
+from rsqsi import lattice as lat
+from rsqsi import brillouin_wigner as bw
 
 JpmA, JpmB, JzzA, JzzB = sp.symbols('J_pm_A J_pm_B J_zz_A J_zz_B')
 
