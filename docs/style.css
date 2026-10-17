@@ -1,16 +1,16 @@
 :root {
-  --bg: #0f1221;
-  --bg-soft: #171a2e;
-  --panel: #1d2138;
-  --border: #2b3052;
-  --text: #e7e9f3;
-  --muted: #a6abc8;
-  --accent: #7aa2ff;
+  --bg: #efe8d3;
+  --bg-soft: #ffffff;
+  --panel: #b6bce2;
+  --border: #000000;
+  --text: #272727;
+  --muted: #373737;
+  --accent: #0801ec;
   --accent-2: #9d7bff;
   --good: #58d6a0;
-  --code-bg: #12152a;
+  --code-bg: #eeeeee;
   --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --sans: "Work Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -19,7 +19,7 @@ html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 80% -10%, #22264a 0%, var(--bg) 55%) fixed;
+  background: radial-gradient(1200px 600px at 80% -10%, #eeeeee 0%, var(--bg) 55%) fixed;
   color: var(--text);
   font-family: var(--sans);
   line-height: 1.65;
@@ -86,7 +86,7 @@ section > h2 {
   padding-bottom: .4rem; border-bottom: 1px solid var(--border);
 }
 section h3 { font-size: 1.15rem; margin: 1.8rem 0 .6rem; color: var(--text); }
-p { color: #dfe2f1; }
+p { color: var(--text); }
 a { color: var(--accent); }
 .muted { color: var(--muted); }
 
@@ -133,7 +133,7 @@ p code, li code, td code {
   border: 1px solid var(--border);
   padding: .05rem .35rem;
   border-radius: 5px;
-  color: #c7d2ff;
+  color: #222;
 }
 pre code { background: none; border: none; padding: 0; }
 

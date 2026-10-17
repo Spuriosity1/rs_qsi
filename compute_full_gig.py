@@ -56,8 +56,8 @@ def pyro_sublattice(L, lid):
 def all_hexagons(m):
     """Distinct hexagons (frozenset of six ring links) with their O_p pattern."""
     seen, out = set(), []
-    for loop in bw.find_closed_loops(m, 3):
-        comp = sum(m.operators[a].od_rep for a in loop)
+    for loop in bw.nonvanishing_strings(m, 3):
+        comp = bw.net_chain(m, loop)
         if np.count_nonzero(comp) == 6 and np.abs(comp).max() == 1 \
                 and bw.is_connected_loop(m, loop):
             ring = frozenset(m.links[i] for i in np.nonzero(comp)[0])
@@ -115,8 +115,8 @@ def gprime_of_hexagon(L, ring, patt, verbose=False):
     C_O = sp.Integer(0)
     nproc = 0
     byclass = {}
-    for loop in bw.find_closed_loops(m2, 4):
-        comp = sum(m2.operators[a].od_rep for a in loop)
+    for loop in bw.nonvanishing_strings(m2, 4):
+        comp = bw.net_chain(m2, loop)
         if not np.array_equal(comp, target):
             continue
         if sum(kinds[a] == 'zpm' for a in loop) != 2:

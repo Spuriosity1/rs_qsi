@@ -43,10 +43,17 @@ def incidence_matrix(lattice, verts=None, links=None) -> sp.SparseMatrix:
 class OperatorSpecificationError(Exception):
     '''Exception raised when operator construction fails.'''
     def __init__(self, od, d):
-        overlap = np.argwhere(od * d != 0)
+        overlap = sorted(set(od) & set(d))
         self.message = 'Off-diagonal and diagonal parts of spin spec overlap.\n'
-        self.message += f'od={od}, d={d}, overlapping indices={overlap}'
+        self.message += f'od={od}, d={d}, overlapping links={overlap}'
         super().__init__(self.message)
+
+
+def _as_sparse(vec) -> dict:
+    '''Normalise an operator spec to a sparse `{link index: nonzero int}` map,
+    accepting either a dense array-like over links or an already-sparse dict.'''
+    items = vec.items() if isinstance(vec, dict) else enumerate(vec)
+    return {int(i): int(v) for i, v in items if v}
 
 
 
@@ -59,18 +66,21 @@ class Operator:
     Representation of a string-type operator on an ice lattice.
 
     coeff: Generic SymPy coefficient.
-    od_rep: Factors of +1 indicate S+, -1 indicate S-. 0 indicates no operator.
-    d_rep: Dangling Sz's. 1 indicates Sz present, 0 otherwise.
+    od_rep: sparse `{link index: factor}` map; +1 indicates S+, -1 indicates S-
+        (absent links are the identity). A hop S+_i S-_j is just `{i: +1, j: -1}`.
+    d_rep: sparse `{link index: 1}` map marking dangling Sz spectators.
 
+    Both are stored sparse because an operator string touches only a handful of
+    the lattice's links; accepts a dense array-like or a dict on construction.
     Note that d_rep and od_rep must be disjoint -- an error is thrown on
     instantiation if they overlap.
     '''
     def __init__(self, coeff: sp.Expr, od_rep, d_rep):
-        self.coeff: sp.Expr  = coeff
-        self.od_rep: np.ndarray = np.array(od_rep, dtype=int)
-        self.d_rep: np.ndarray = np.array(d_rep, dtype=int)
+        self.coeff: sp.Expr = coeff
+        self.od_rep: dict = _as_sparse(od_rep)
+        self.d_rep: dict = _as_sparse(d_rep)
 
-        if np.any(self.od_rep*self.d_rep):
+        if set(self.od_rep) & set(self.d_rep):
             raise OperatorSpecificationError(self.od_rep, self.d_rep)
 
 
@@ -92,8 +102,11 @@ class Model:
         self.operators = []
         self.links = list(lattice.links)                 # canonical column order
         self.verts = list(lattice.verts)                 # canonical row order
-        self.constraints = [1 for _ in self.verts]     # constraint strengths
+        self.constraints: list = [sp.Integer(1) for _ in self.verts]   # strengths
         self.incidence = incidence_matrix(lattice, self.verts, self.links)
+        # Odd-order (1-/3-member) constrainers carry a half-integer "zero point"
+        # C_v = +-1/2: an open string may begin/end there. Even vertices -> C_v = 0.
+        self.odd = [len(lattice.incident[v]) % 2 == 1 for v in self.verts]
 
     def set_constraint(self, coeff: sp.Expr, vert_id: int):
         '''Set the H0 strength on vertex index `vert_id` (position in self.verts).'''
@@ -106,11 +119,13 @@ class Model:
         assert len(d_rep) == len(self.links)
         self.operators.append(Operator(coeff, od_rep, d_rep))
 
-    def chain_matrix(self) -> sp.Matrix:
-        '''od_reps stacked as the columns of an |L| x T integer matrix, so
+    def chain_matrix(self) -> sp.SparseMatrix:
+        '''od_reps stacked as the columns of an |L| x T sparse integer matrix, so
         `self.incidence * self.chain_matrix()` has a zero column exactly where
         that operator's 1-chain is already closed.'''
-        return sp.Matrix([list(o.od_rep) for o in self.operators]).T
+        data = {(i, j): s for j, o in enumerate(self.operators)
+                for i, s in o.od_rep.items()}
+        return sp.SparseMatrix(len(self.links), len(self.operators), data)
 
     def boundary(self, chain) -> sp.MatrixBase:
         '''The 0-chain d c: charge deposited on each vertex (in self.verts order).'''
@@ -121,46 +136,49 @@ class Model:
         return self.boundary(chain) == sp.zeros(len(self.verts), 1)
 
 
-def find_closed_loops(model: Model, order: int) -> list[tuple[int]]:
+def nonvanishing_strings(model: Model, order: int) -> list[tuple[int]]:
     '''
-    All closed loops built from exactly `order` operator applications.
+    All closed loops / open strings built from exactly `order` operator applications.
 
     Write |L| = # links, |V| = # vertices, T = # terms.
     Let G = chain_matrix (|L| x T, operator od_reps as columns) and iota = d_1.
     Then Q = iota @ G (|V| x T) is the charge each operator deposits on the
-    tetrahedra. A multiset of operators with count vector x (in Z^T_>=0) is a
-    loop iff it leaves no net spinon, i.e. Q x = 0, with |x|_1 = order.
+    tetrahedra. A multiset of operators with count vector x (in Z^T_>=0) of total
+    weight `order` is admissible iff its net boundary q = Q x lands the system back
+    in the ground manifold on every vertex:
 
-    So the loops are the non-negative integer points of ker Q on the order-N
-    shell. That is a bounded lattice search, not a linear solve: we never touch
-    floats (an integer null space through ℝ would need exact rescaling *and*
-    saturation to be trustworthy). We enumerate x directly, operator counts in
-    non-decreasing index order (canonical -> each multiset once), pruning any
-    branch whose running boundary cannot reach 0 within the remaining budget.
+      * even-order (integer, C_v = 0) vertices: q_v == 0  (a true 1-cycle there);
+      * odd-order (half-integer, C_v = +-1/2) vertices: q_v in {-1, 0, +1}, i.e. the
+        string may flip that endpoint's zero point +-1/2 <-> -+1/2, or leave it.
 
-    Returns a list of sorted operator-index tuples (an operator may repeat); the
-    composite 1-chain is sum(model.operators[a].od_rep for a in loop). Assumes
+    With no odd vertices this is exactly Q x = 0 (closed loops). The odd rows let an
+    open string terminate in the ground manifold on a 1-/3-member constrainer; total
+    charge is conserved (sum_v q_v = 0) so odd ends come in balancing pairs for free.
+
+    Returns a list of sorted operator-index tuples (an operator may repeat);
+    the prefactors are added elsewhere in net_chain(model, loop). Assumes
     model.operators already contains the Hermitian conjugates (S+<->S-), so x
     stays non-negative. Connectivity is NOT imposed -- a disjoint pair of small
-    rings is also a valid Q x = 0 point; filter on support adjacency downstream
-    if you want only linked clusters.
+    rings is also admissible.
     '''
     if order < 1:
         return []
 
     Q = np.array((model.incidence * model.chain_matrix()).tolist(), dtype=int)   # |V| x T
-    active = [a for a, o in enumerate(model.operators) if o.od_rep.any()]         # drop pure-Sz ops
+    active = [a for a, o in enumerate(model.operators) if o.od_rep]               # drop pure-Sz ops
     step = max((int(np.abs(Q[:, a]).sum()) for a in active), default=0)           # max |db|_1
+    odd = np.array(model.odd, dtype=bool)                                         # half-integer rows
+    slack = odd.astype(int)                            # odd rows may end at |q| <= 1
 
     loops = []
 
     def grow(used, q, start):
         if len(used) == order:
-            if not q.any():                                      # Q x == 0: closed
+            if not q[~odd].any() and np.all(np.abs(q[odd]) <= 1):   # back in the manifold
                 loops.append(tuple(used))
             return
-        if step and int(np.abs(q).sum()) > (order - len(used)) * step:
-            return                                               # cannot close in time
+        if step and int(np.maximum(np.abs(q) - slack, 0).sum()) > (order - len(used)) * step:
+            return                                               # cannot land in time
         for i in range(start, len(active)):                      # non-decreasing -> unique multisets
             a = active[i]
             grow(used + [a], q + Q[:, a], i)
@@ -182,9 +200,6 @@ def Sz(link) -> sp.Symbol:
 # RS expands G0(E) in the energy corrections E^(n):
 #   G0^(a) = sum_{j=1..a} sum_{compositions (n_1..n_j) of a} (prod E^(n_i)) g^{j+1}
 #   H_eff^(n) = sum over {m factors of V, m + sum a_i = n} of V Q G0^(a_1) V ... V
-# So a counterterm is just higher powers of the SAME scalar resolvent, weighted
-# by products of lower-order E^(n): a finite polynomial, no derivatives.
-
 
 def _integer_compositions(a: int):
     '''All ordered compositions of a >= 1 into positive parts; () for a == 0.'''
@@ -248,6 +263,22 @@ def _walsh_fit(values: dict, sites: tuple) -> sp.Expr:
     return sp.expand(out)
 
 
+def _virtual_energy(charge, ground_sign, con, odd) -> sp.Expr:
+    '''Virtual spinon energy E_k = sum_v con_v [(C_gs,v + Delta_v)^2 - C_gs,v^2] of a
+    state whose deviation from the ground manifold is `charge` (one entry per support
+    vertex). Even vertices have ground charge 0 -> con*Delta^2; odd vertices have
+    C_gs = ground_sign/2 (+-1/2) -> con*Delta*(Delta + ground_sign) (the 1/4 cancels,
+    so this stays integer-weighted and no rationals appear). E_k == 0 iff the state is
+    back in the ground manifold on every support vertex.'''
+    E = sp.Integer(0)
+    for i in range(len(charge)):
+        d = int(charge[i])
+        if not d:
+            continue
+        E += con[i] * d * (d + ground_sign[i]) if odd[i] else con[i] * d * d
+    return E
+
+
 def calc_coeff(model: Model, loop: tuple[int]) -> sp.Expr:
     '''
     Scalar BW amplitude of one `loop` (a multiset of operator indices from
@@ -273,11 +304,10 @@ def calc_coeff(model: Model, loop: tuple[int]) -> sp.Expr:
     ops = [model.operators[a] for a in loop]
     T = len(ops)
     coupling = sp.prod([o.coeff for o in ops])
-    spectators = sp.prod([Sz(model.links[i]) for o in ops
-                          for i in np.nonzero(o.d_rep)[0]])
+    spectators = sp.prod([Sz(model.links[i]) for o in ops for i in o.d_rep])
 
     # support: the links the loop flips, and the vertices those links touch
-    supp = sorted({i for o in ops for i in np.nonzero(o.od_rep)[0]})
+    supp = sorted({i for o in ops for i in o.od_rep})
     vloc: dict = {}
     for p in supp:
         for vid in model.lattice.links[model.links[p]].boundary():
@@ -287,8 +317,13 @@ def calc_coeff(model: Model, loop: tuple[int]) -> sp.Expr:
         for vid, sign in model.lattice.links[model.links[p]].boundary().items():
             Dr[vloc[vid], col] = sign
     vpos = {vid: i for i, vid in enumerate(model.verts)}
+    if any(model.odd[vpos[vid]] for vid in vloc):
+        raise NotImplementedError(
+            "loop touches an odd-order vertex: open-string amplitudes are "
+            "background-dependent (operator-valued); use walsh_amplitude.")
     con = [model.constraints[vpos[vid]] for vid in vloc]    # H0 strength per support vert
-    od_r = [o.od_rep[supp] for o in ops]                    # each op's flips on the support
+    od_r = [np.array([o.od_rep.get(p, 0) for p in supp], dtype=int)   # flips on the support
+            for o in ops]
     dq = [Dr @ r for r in od_r]                             # charge each op deposits
 
     total = sp.Integer(0)
@@ -331,8 +366,15 @@ def walsh_amplitude(model: Model, loop: tuple[int],
     composite != 0); those spins are forced to the unique start O acts on, so the
     returned S^z polynomial is the *dressing* of O (and for a diagonal loop,
     composite == 0, the whole diagonal operator -- its constant term is E^(n)).
-    Intermediate energies are the background-independent hop charges; the Q
-    projector (no model-space return mid-process) is kept. Support-restricted.
+
+    Odd-order (1-/3-member) support vertices carry a half-integer zero point
+    C_v = +-1/2 whose sign is set by the background, so an *open string* may begin
+    and end there. For those vertices we enumerate the full incident configuration,
+    keep only backgrounds that are an odd-vertex ground state (|C| = 1/2; aligned
+    triangles |C| = 3/2 are projected out -> the flippable-state projector appears
+    automatically in the Walsh fit), and use the ground-sign-aware virtual energy
+    (_virtual_energy). The Q projector generalises from "all charges zero" to
+    "E_k == 0" (back in the ground manifold). Support-restricted.
     '''
     ops = [model.operators[a] for a in loop]
     T = len(ops)
@@ -342,17 +384,13 @@ def walsh_amplitude(model: Model, loop: tuple[int],
         Ecorr = {}
     coupling = sp.prod([o.coeff for o in ops])
 
-    composite = sum((o.od_rep for o in ops),                # net flip = ladder channel
-                    np.zeros(len(model.links), dtype=int))
-    touched = sorted({i for o in ops
-                      for i in (*np.nonzero(o.od_rep)[0], *np.nonzero(o.d_rep)[0])})
-    tpos = {i: k for k, i in enumerate(touched)}            # link index -> state slot
-    ladder = [i for i in touched if composite[i] != 0]      # net-flipped -> part of O
-    fit = [i for i in touched if composite[i] == 0]         # Sz good quantum numbers
-    forced = {tpos[i]: -int(np.sign(composite[i])) for i in ladder}  # start O acts on
+    composite = np.zeros(len(model.links), dtype=int)       # net flip = ladder channel
+    for o in ops:
+        for i, s in o.od_rep.items():
+            composite[i] += s
 
-    # charge / energy data on the od-support (background-independent)
-    supp = sorted({i for o in ops for i in np.nonzero(o.od_rep)[0]})
+    # charge / energy data on the od-support
+    supp = sorted({i for o in ops for i in o.od_rep})
     vloc: dict = {}
     for p in supp:
         for vid in model.lattice.links[model.links[p]].boundary():
@@ -363,7 +401,25 @@ def walsh_amplitude(model: Model, loop: tuple[int],
             Dr[vloc[vid], col] = sign
     vpos = {vid: i for i, vid in enumerate(model.verts)}
     con = [model.constraints[vpos[vid]] for vid in vloc]
-    dq = [Dr @ o.od_rep[supp] for o in ops]
+    odd_supp = [model.odd[vpos[vid]] for vid in vloc]       # half-integer support verts
+    dq = [Dr @ np.array([o.od_rep.get(p, 0) for p in supp], dtype=int) for o in ops]
+
+    # An odd support vertex's +-1/2 zero point is read from its *full* incident
+    # configuration, so pull every link touching one into the enumerated set and
+    # record its incident (slot, boundary-sign) list for the ground-charge readout.
+    lpos = {lid: i for i, lid in enumerate(model.links)}
+    odd_links: dict = {}                                    # vloc pos -> [(link idx, sign)]
+    for vid, vl in vloc.items():
+        if odd_supp[vl]:
+            odd_links[vl] = [(lpos[lid], sign)
+                             for lid, sign in model.lattice.constrainer(vid).items()]
+
+    touched = sorted({i for o in ops for i in (*o.od_rep, *o.d_rep)}
+                     | {li for lst in odd_links.values() for li, _ in lst})
+    tpos = {i: k for k, i in enumerate(touched)}            # link index -> state slot
+    ladder = [i for i in touched if composite[i] != 0]      # net-flipped -> part of O
+    fit = [i for i in touched if composite[i] == 0]         # Sz good quantum numbers
+    forced = {tpos[i]: -int(np.sign(composite[i])) for i in ladder}  # start O acts on
 
     values = {}
     for fit_sigma in itertools.product((1, -1), repeat=len(fit)):
@@ -372,6 +428,21 @@ def walsh_amplitude(model: Model, loop: tuple[int],
             start[pos] = val
         for k, i in enumerate(fit):
             start[tpos[i]] = fit_sigma[k]
+
+        # ground sign of each odd support vertex; project out non-ground backgrounds
+        # (|C| != 1/2) -- the flippable-state projector, which the Walsh fit absorbs.
+        ground_sign = [0] * len(vloc)
+        in_manifold = True
+        for vl, lst in odd_links.items():
+            raw = sum(sign * start[tpos[li]] for li, sign in lst)
+            if abs(raw) != 1:
+                in_manifold = False
+                break
+            ground_sign[vl] = 1 if raw > 0 else -1
+        if not in_manifold:
+            values[fit_sigma] = sp.Integer(0)
+            continue
+
         amp = sp.Integer(0)
         for perm in itertools.permutations(range(T)):
             state = list(start)
@@ -380,8 +451,7 @@ def walsh_amplitude(model: Model, loop: tuple[int],
             ok = True
             for k, a in enumerate(perm):
                 op = ops[a]
-                for i in np.nonzero(op.od_rep)[0]:          # apply S+/S- honestly
-                    s = int(op.od_rep[i])
+                for i, s in op.od_rep.items():              # apply S+/S- honestly
                     w = tpos[i]
                     if state[w] != -s:                      # S+ needs down, S- up
                         ok = False
@@ -390,14 +460,13 @@ def walsh_amplitude(model: Model, loop: tuple[int],
                 if not ok:
                     break
                 charge = charge + dq[a]
-                for i in np.nonzero(op.d_rep)[0]:           # dangling Sz eigenvalue
+                for i in op.d_rep:                          # dangling Sz eigenvalue
                     factor *= sp.Rational(state[tpos[i]], 2)
                 if k < T - 1:                               # dressed propagator
-                    nz = np.nonzero(charge)[0]
-                    if nz.size == 0:                        # model-space return (Q)
+                    E_k = _virtual_energy(charge, ground_sign, con, odd_supp)
+                    if E_k == 0:                            # model-space return (Q)
                         ok = False
                         break
-                    E_k = sum(con[j] * int(charge[j])**2 for j in nz)
                     g = sp.Integer(-1) / E_k
                     factor *= sum(w * g**p for w, p in _g0_dressing(slot_orders[k], Ecorr))
             if ok:
@@ -413,11 +482,19 @@ def walsh_amplitude(model: Model, loop: tuple[int],
 # --------------------------------------------------------------------------
 
 
+def net_chain(model: Model, loop: tuple[int]) -> np.ndarray:
+    '''The loop's composite 1-chain -- the sum of its operators' (sparse) od_reps
+    scattered into a dense length-|L| integer vector (its ladder channel).'''
+    comp = np.zeros(len(model.links), dtype=int)
+    for a in loop:
+        for i, s in model.operators[a].od_rep.items():
+            comp[i] += s
+    return comp
+
+
 def _net_flip(model: Model, loop: tuple[int]) -> tuple:
-    '''The loop's composite 1-chain (its ladder channel) as a hashable key.'''
-    comp = sum((model.operators[a].od_rep for a in loop),
-               np.zeros(len(model.links), dtype=int))
-    return tuple(int(x) for x in comp)
+    '''The loop's composite 1-chain as a hashable key.'''
+    return tuple(int(x) for x in net_chain(model, loop))
 
 
 def is_connected_loop(model: Model, loop: tuple[int]) -> bool:
@@ -425,7 +502,7 @@ def is_connected_loop(model: Model, loop: tuple[int]) -> bool:
     line graph (links adjacent iff they share a tetrahedron). Linked-cluster
     filter -- find_closed_loops also returns disconnected multisets.'''
     supp = {model.links[i] for a in loop
-            for i in np.nonzero(model.operators[a].od_rep)[0]}
+            for i in model.operators[a].od_rep}
     if len(supp) <= 1:
         return True
     start = next(iter(supp))
@@ -458,7 +535,7 @@ def energy_corrections(model: Model, max_order: int,
     for n in range(2, max_order + 1):
         diag = sp.Integer(0)
         for m in range(2, n + 1):
-            for loop in find_closed_loops(model, m):
+            for loop in nonvanishing_strings(model, m):
                 if connectivity == 'linked' and not is_connected_loop(model, loop):
                     continue
                 if any(_net_flip(model, loop)):          # off-diagonal -> not energy
@@ -474,7 +551,7 @@ def rs_effective_terms(model: Model, order: int,
     '''RS-corrected coefficient of each operator structure at total `order`.
 
     Returns {net-flip key -> Sz-polynomial coefficient}. For every connected loop
-    L of order m in 2..order, add sum over slot distributions of (order-m) of
+    L of order m in 1..order, add sum over slot distributions of (order-m) of
     walsh_amplitude(L, dist, Ecorr) to L's ladder channel (its net flip). RS
     introduces no new structures -- only coefficient corrections -- so the keys
     are exactly the channels the BW loops already produce; the Sz-free part of
@@ -482,15 +559,18 @@ def rs_effective_terms(model: Model, order: int,
     '''
     Ecorr = energy_corrections(model, order, connectivity)
     terms: dict = {}
-    for m in range(2, order + 1):
-        for loop in find_closed_loops(model, m):
+    for m in range(1, order + 1):
+        for loop in nonvanishing_strings(model, m):
             if connectivity == 'linked' and not is_connected_loop(model, loop):
                 continue
             key = _net_flip(model, loop)
             for dist in _slot_distributions(m - 1, order - m):
                 terms[key] = terms.get(key, sp.Integer(0)) \
                     + walsh_amplitude(model, loop, dist, Ecorr)
-    return {k: sp.cancel(v) for k, v in terms.items()}
+    terms = {k: sp.cancel(v) for k, v in terms.items()}
+    # filter out zero terms
+    terms = {k:v for k,v in terms.items() if v != 0}
+    return terms
 
 
 

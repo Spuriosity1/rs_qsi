@@ -13,10 +13,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "scipy"]      # scipy: sparse ED in the cross-check (test-only)
 
 [tool.setuptools]
 packages = ["rsqsi"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not slow'"       # the ED cross-checks are opt-in: run with -m slow
+markers = [
+    "slow: exact-diagonalisation cross-checks (minutes); run with `pytest -m slow`",
+]

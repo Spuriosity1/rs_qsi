@@ -53,8 +53,8 @@ def _channel(m, lp):
 def test_n3_ring_exchange(model):
     """Each hexagon's two channels give 3! J_pm,A^3/J_zz,B^2 and 3! J_pm,B^3/J_zz,A^2."""
     rings = {'A': [], 'B': []}
-    for lp in bw.find_closed_loops(model, 3):
-        comp = sum(model.operators[a].od_rep for a in lp)
+    for lp in bw.nonvanishing_strings(model, 3):
+        comp = bw.net_chain(model, lp)
         if np.count_nonzero(comp) == 6 and np.abs(comp).max() == 1:   # a hexagon O_p
             ch = _channel(model, lp)
             if ch:
@@ -69,9 +69,9 @@ def test_n3_ring_exchange(model):
 
 def test_n2_ising(model):
     """A there-and-back on an A bond gives -2 J_pm,A^2 / J_zz,B (opposite sublattice)."""
-    lp = next(lp for lp in bw.find_closed_loops(model, 2)
+    lp = next(lp for lp in bw.nonvanishing_strings(model, 2)
               if _channel(model, lp) == 'A'
-              and not np.any(sum(model.operators[a].od_rep for a in lp)))
+              and not np.any(bw.net_chain(model, lp)))
     c = bw.calc_coeff(model, lp)
     assert sp.simplify(c + 2 * JpmA**2 / JzzB) == 0
 
@@ -81,15 +81,15 @@ def test_n2_ising(model):
 # --------------------------------------------------------------------------
 
 def _a_bond(model):
-    return next(lp for lp in bw.find_closed_loops(model, 2)
+    return next(lp for lp in bw.nonvanishing_strings(model, 2)
                 if _channel(model, lp) == 'A'
-                and not np.any(sum(model.operators[a].od_rep for a in lp)))
+                and not np.any(bw.net_chain(model, lp)))
 
 
 def _a_hexagon(model):
-    return next(lp for lp in bw.find_closed_loops(model, 3)
+    return next(lp for lp in bw.nonvanishing_strings(model, 3)
                 if _channel(model, lp) == 'A'
-                and np.count_nonzero(sum(model.operators[a].od_rep for a in lp)) == 6)
+                and np.count_nonzero(bw.net_chain(model, lp)) == 6)
 
 
 def _szsz_coeff(expr):
@@ -139,11 +139,11 @@ def test_e2_is_sz_free_scalar(model):
 def test_connectivity_filter(model):
     """A hexagon is connected; a disjoint pair of there-and-backs is not."""
     assert bw.is_connected_loop(model, _a_hexagon(model))
-    tabs = [lp for lp in bw.find_closed_loops(model, 2)
-            if not np.any(sum(model.operators[a].od_rep for a in lp))]
+    tabs = [lp for lp in bw.nonvanishing_strings(model, 2)
+            if not np.any(bw.net_chain(model, lp))]
 
     def supp(lp):
-        return {i for a in lp for i in np.nonzero(model.operators[a].od_rep)[0]}
+        return {i for a in lp for i in model.operators[a].od_rep}
 
     def adjacent(sx, sy):
         return any(model.links[j] in lat.link_neighbors(model.lattice, model.links[i])

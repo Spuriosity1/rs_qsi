@@ -57,7 +57,7 @@ def main() -> None:
         m.set_constraint((JzzA if v[1] == 0 else JzzB) / 2, idx)
 
     for order in range(4):
-        loops = bw.find_closed_loops(m, order)
+        loops = bw.nonvanishing_strings(m, order)
         print(f"Order {order} -> found {len(loops)} unique loops")
     
 

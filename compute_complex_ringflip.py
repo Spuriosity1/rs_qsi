@@ -215,11 +215,12 @@ def main():
         Es = []
         for k, nm in enumerate(order):
             o = ops[idx[nm]]
-            for p in np.nonzero(o.od_rep)[0]:
+            for p in o.od_rep:
                 site = m.links[p]
                 state[site] = -state[site]
-            charge = charge + inc @ o.od_rep
-            for p in np.nonzero(o.d_rep)[0]:
+            for p, s in o.od_rep.items():
+                charge = charge + s * inc[:, p]
+            for p in o.d_rep:
                 factor *= sp.Rational(state[m.links[p]], 2)   # dangling S^z
             if k < len(order) - 1:
                 Ek = sum(con[i] * int(charge[i])**2 for i in np.nonzero(charge)[0])

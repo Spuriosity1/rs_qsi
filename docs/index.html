@@ -6,7 +6,7 @@
 <title>rsqsi — RS effective Hamiltonians for disordered quantum spin ice</title>
 <meta name="description" content="A Python engine that generates terms of the Rayleigh–Schrödinger series for the effective Hamiltonian of quantum spin ice with disorder.">
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/arduino-light.min.css">
 <script>
   window.MathJax = {
     tex: {
@@ -16,8 +16,8 @@
         deq: '\\mathrel{:=}',
         ket: ['\\left|#1\\right\\rangle', 1],
         bra: ['\\left\\langle#1\\right|', 1],
-        Up: '\\triangle',
-        Down: '\\triangledown',
+          Up: '\\operatorname{Up}',
+          Down: '\\operatorname{Down}',
         Links: '\\mathcal{K}_1'
       }
     },
@@ -649,13 +649,12 @@
 
   <h3>String operators and the linked-cluster theorem</h3>
   <p>
-    The special form of an ice model -- a constrainer model having only 
-  <p>
   If all constraints can be simultaneously set to zero -- as is the case in
   <em>clean</em> spin ice -- then we immediately see that all loops must be
   closed. If, however, any three-member or one-member constraints are present,
-  then the ground state sees not \(C_t=0\), but a "zero point" \(C_t=\pm
+  then the ground state sees not \(C_t=0\) --- there is a residual fluctuating charge in the ground state; \(C_t=\pm
   \tfrac12 \).
+  </p>
 </section>
 
 <!-- ================================================================= -->
@@ -669,12 +668,41 @@
         the virtual spinon energy entering every propagator factor \([E-H_0]^{-1}\).</li>
       <li>Sum over all orderings.</li>
     </ol>
+    <p>
+      We will illustrate the generating procedure for a generic ice model, having the XXZ form
+      \[H = \sum_{t} \sum_{i\neq j \in \delta t} \frac{J_{zz}}{2}S^z_iS^z_j + J_\pm S^+_iS^-_j, \]
+      where the outer sum runs over all tetrahedra (vertices) of the chain
+      complex, $\delta t$ is the coboundary of $t$, and $i\neq j$ counts each
+      bond twice, once in each direction (and so there is no need to add a
+      \(+h.c.\) to make this expression self-adjoint).
+    </p>
   <p>
-    For the breathing-pyrochlore XXZ model the leading non-trivial order is
+  The simplest example of this comes at first order. The geometry in question
+  consists of a complete tetrahedron, corner-sharing with two triangles (in the
+  \(r\)-chain language, this consists of a single 4-vertex connected to two
+  3-vertices):
+  </p>
+    <embed class='isvg' src="assets/first_order.svg">
+  <p>
+  Introducing the projector onto the singlet subspace \(\pi_{ij} =\frac{1}{2} + 2S_i^zS_j^z\),
+  the <em>first-order</em> effective Hamiltonian becomes \[H^{(1)}_{\rm eff}=J_\pm
+  \pi_{34}\left(S^+_1S^-_2 + S^-_1S^+_2\right)\pi_{56}\] 
+
+  This term applies also to the case of
+  an extensive pyrochlore lattice with a small number of vacancies, effectively
+  creating these triangles.
+  </p>
+  <p>
+  At second order, one can consider checkerboard spin ice in 2D, corresponding to the links of a square lattice. Two two-site hops cooperate to move a virtual spinon pair around a plaquette (uncrossed square), producing
+  \[H^{(2)}_{\rm eff}=2\times 2!\frac{J_\pm^2}{J_{zz}}  S_1^+S_2^-S_3^+S_4^- + h.c. \]
+  </p>
+  <p>
+    For the clean, breathing-pyrochlore case, the leading non-trivial order is
     \(N=3\): three two-site hops close into a hexagon and produce the canonical
     ring exchange
   </p>
   <div class="eq">\[
+    H^{(3)}_{\rm eff} =
     \Bigl[\,3!\,\tfrac{J_{\pm,B}^{3}}{J_{zz,A}^{2}}
       + 3!\,\tfrac{J_{\pm,A}^{3}}{J_{zz,B}^{2}}\Bigr]\,
     S_1^{+}S_2^{-}S_3^{+}S_4^{-}S_5^{+}S_6^{-} \;=\; g\,\mathcal O_p .
@@ -685,39 +713,30 @@
 <section id="algorithm">
   <h2>How the engine works</h2>
   <p>
-    Because the effective operator is local, the engine reconstructs it from its
-    action on the <em>support</em> of the process alone. For a given cluster and
-    order \(N\):
+    To begin with, we express all off-diagonal terms in the initial perturbative problem in the form
+    \[V = \sum_j C^{[j]} \left(\prod_{l}  (S^z_l)^{d^{[j]}_l}  S^{o^{[j]}_l} \right) \]
+    where both products run over all links of the lattice. Writing \(N_{\rm link}\) for the total number of links, each term is uniquely expressed by the triple \((C, d, o)\): respectively, a symbolic coefficient, a vector in \(\mathbb{Z}^{N_{\rm link}}\) indicating the presence or absence of an \(S^z\) with 1 or 0, and a vector in \(\mathbb{Z}^{N_{\rm link}}\), where \(\pm 1\) indicates \(S^\pm\), and 0 indicates that no ladder operator is present. 
+    Without loss of generality, we can insist that \( d_l o_l = 0 \;\forall l\).
   </p>
-  <ol>
-    <li>For every \(S^z\) pattern \(\sigma \in \{\pm 1\}^{\text{support}}\) (each a
-      would-be ice state), it performs a depth-\(N\) search over the available string
-      terms, evolving the configuration hop by hop.</li>
-    <li>A branch is kept only if every <em>intermediate</em> state carries spinons
-      (lies in \(\mathcal{M}^\perp\)), the final state returns every incident tetrahedron to zero
-      charge (a closed loop), and the touched sites are connected on the interaction
-      graph (linked-cluster).</li>
-    <li>Each surviving ordering contributes
-      \(\bigl(\textstyle\prod \text{couplings}\bigr)\cdot
-        \prod_k \frac{-1}{E_k}\), where \(E_k\) is the virtual spinon energy after
-      \(k\) hops. Since \(\sigma\) is (locally) an ice state, these energies depend
-      only on the hop-induced charges and are therefore
-      <strong>background-independent</strong>.</li>
-    <li>Diagonal \(S^z\) factors in a term multiply the amplitude by their
-      (configuration-dependent) eigenvalues.</li>
-    <li>The accumulated amplitudes, as functions of \(\sigma\), are mapped back to
-      operators by a <strong>Walsh/Fourier transform</strong> (using
-      \(\sigma_i = 2 S^z_i\)): a diagonal polynomial in the \(S^z\) of the support,
-      plus one ladder monomial per off-diagonal flip channel (with any \(S^z\)
-      dressing on the spectator sites).</li>
-  </ol>
-  <div class="note">
-    <strong>Symbolic by construction.</strong> Couplings and virtual energies are
-    <code>sympy</code> expressions carrying per-sublattice (and, in general,
-    per-bond) symbols. The noncommutative operator <em>structure</em> is represented
-    with the <a href="https://pypi.org/project/Commutation/">Commutation</a> package,
-    which also renders LaTeX. Disorder is just “more symbols”.
-  </div>
+  <p>
+  We now filter out each appearance of \(V\) in the Brillouin-Wigner series to keep only non-vanishing terms. Any operator appearing at order \(n\) can be uniquely represented by the set of \(n\) \((C^{[j]}, d^{[j]}, o^{[j]})\)'s making up its constituent bare terms.
+  </p>
+  <p>
+  If the lattice is <em>even</em>, i.e. the ground state has \(C_i\equiv 0\), then terms must have \(\sum_{j} o^{[j]}_l = 0 \forall l\); i.e. they preserve all local constraints. If there are any odd-order triangles present in the system, then we have the weaker constraint \( \partial \sum_{j} o^{[j]}_l \in v_\triangle \), where \(v_\triangle\) is the set of odd-order vertices, and we abuse notation on the left hand side to mean, 'The 1-chain constructed from \(o\).'
+  Viewed as an integer-valued matrix problem, the necessary condition for a non-vanishing operator reads as
+  \[ \iota_{vl} o^{[n]}_l c_n = \delta_{v \in v_{\triangle}}.\]
+  Indeed, one may readily extra a basis over the \(\mathbb{Z}\)-module of links for the non-vanishing terms from the Smith normal form of $\iota o$. This is, however, generally impractical — the basis does not separate cleanly into different orders (for this, one neefs the \(L_1\)-norm of each vector in the kernel); and one necessarily works over the space of all orders in perturbation theory.
+  </p>
+  <p>
+  In practice, we simply search for kernel elements at a particular order by brute force. The linked-cluster theorem constrains this to a number of terms scaling worst-case like the area law \(n^{d-1}\).
+  </p>
+
+
+
+
+
+
+
 </section>
 
 <!-- ================================================================= -->
@@ -866,9 +885,8 @@ print(sp.simplify(res.ring_coefficient()))
 </section>
 
 <footer>
-  <p>Generated documentation for <strong>rsqsi</strong> — Rayleigh–Schrödinger
-  effective-Hamiltonian term generator for disordered quantum spin ice. Static site;
-  deploy by serving <code>./docs/</code> on any static host (e.g. GitHub Pages).</p>
+  <p>Documentation for <strong>rsqsi</strong> — Rayleigh–Schrödinger
+  effective-Hamiltonian term generator for disordered quantum spin ice.</p>
 </footer>
 
 </main>
